@@ -10,4 +10,9 @@ Camden Council involves the followings
 * Request actual DA page for data - Yes
 * Clearly defined data within a row - Yes
 
+Setup MORPH_PERIOD for data recovery, available options are
+* thisweek (default)
+* thismonth
+* lastmonth
+
 Enjoy

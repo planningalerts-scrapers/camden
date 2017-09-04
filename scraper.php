@@ -1,175 +1,83 @@
 <?php
-### Camden Council scraper - ApplicationMaster
-require 'scraperwiki.php'; 
-require 'simple_html_dom.php';
+### Camden Council Scraper
+require_once 'vendor/autoload.php';
+require_once 'vendor/openaustralia/scraperwiki/scraperwiki.php';
+
+use PGuardiario\PGBrowser;
+
 date_default_timezone_set('Australia/Sydney');
 
-## Accept Terms and return Cookies
-function accept_terms_get_cookies($terms_url, $button='Next', $postfields=array()) {
-    $dom = file_get_html($terms_url);
-
-    foreach ($dom->find('input[type=hidden]') as $data) {
-        $postfields = array_merge($postfields, array($data->name => $data->value));
-    }
-    foreach ($dom->find("input[value=$button]") as $data) {
-        $postfields = array_merge($postfields, array($data->name => $data->value));
-    }
-
-    $curl = curl_init($terms_url);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($curl, CURLOPT_POST, 1);
-    curl_setopt($curl, CURLOPT_POSTFIELDS, $postfields);
-    curl_setopt($curl, CURLOPT_HEADER, TRUE);
-    $terms_response = curl_exec($curl);
-    curl_close($curl);
-    // get cookie
-    // Please imporve it, I am not regex expert, this code changed ASP.NET_SessionId cookie
-    // to ASP_NET_SessionId and Path, HttpOnly are missing etc
-    // Example Source - Cookie: ASP.NET_SessionId=bz3jprrptbflxgzwes3mtse4; path=/; HttpOnly
-    // Stored in array - ASP_NET_SessionId => bz3jprrptbflxgzwes3mtse4
-    preg_match_all('/^Set-Cookie:\s*([^;]*)/mi', $terms_response, $matches);
-    $cookies = array();
-    foreach($matches[1] as $item) {
-        parse_str($item, $cookie);
-        $cookies = array_merge($cookies, $cookie);
-    }
-    return $cookies;
-}
-
-### Collect all 'hidden' inputs, plus add the current $eventtarget
-### $eventtarget is coming from the 'pages' section of the HTML
-### This is for pagnation
-function buildformdata($dom, $eventTarget, $eventArgument="") {
-    $a = array();
-    foreach ($dom->find("input[type=hidden]") as $input) {
-        if ($input->value === FALSE) {
-            $a = array_merge($a, array($input->name => ""));
+# Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
+switch(getenv('MORPH_PERIOD')) {
+    case 'thismonth' :
+        $sdate = date('01/m/Y');
+        $edate = date('t/m/Y');
+        break;
+    case 'lastmonth' :
+        $sdate = date('01/m/Y', strtotime('-1 month'));
+        $edate = date('t/m/Y', strtotime('-1 month'));
+        break;
+    default          :
+        if ( preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/', getenv('MORPH_PERIOD'), $matches) == true) {
+            $sdate = date('01/m/Y', strtotime($matches[0]. '-01'));
+            $edate = date('t/m/Y', strtotime($matches[0]. '-01'));
         } else {
-            $a = array_merge($a, array($input->name => $input->value));
+            $sdate = date('d/m/Y', strtotime('-10 days'));
+            $edate = date('d/m/Y');
         }
-    }
-    $a = array_merge($a, array('__EVENTTARGET' => $eventTarget));
-    $a = array_merge($a, array('__EVENTARGUMENT' => $eventArgument));
-    
-    return $a;
+        break;
 }
+print "Getting data between " .$sdate. " and " .$edate. ", changable via MORPH_PERIOD environment\n";
 
+$url_base = "http://planning.camden.nsw.gov.au";
+$comment_base = "mailto:mail@camden.nsw.gov.au";
 
-$url_base = "http://planning.camden.nsw.gov.au/MasterViewUI/Modules/ApplicationMaster/";
+$browser = new PGBrowser();
+$page = $browser->get($url_base . "/");
 
-    # Default to 'thisweek', use MORPH_PERIOD to change to 'thismonth' or 'lastmonth' for data recovery
-    switch(getenv('MORPH_PERIOD')) {
-        case 'thismonth' :
-            $period = 'thismonth';
-            break;
-        case 'lastmonth' :
-            $period = 'lastmonth';
-            break;
-        default         :
-            $period = 'thisweek';
-            break;
-    }
+/* Request the actual payload
+ * Note: $junk has been modified to download 500 records
+ */
+$headers = ["Accept: application/json, text/javascript, */*; q=0.01"];
+$junk = "draw=1&columns%5B0%5D%5Bdata%5D=0&columns%5B0%5D%5Bname%5D=&columns%5B0%5D%5Bsearchable%5D=true&columns%5B0%5D%5Borderable%5D=false&columns%5B0%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B0%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B1%5D%5Bdata%5D=1&columns%5B1%5D%5Bname%5D=&columns%5B1%5D%5Bsearchable%5D=true&columns%5B1%5D%5Borderable%5D=false&columns%5B1%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B1%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B2%5D%5Bdata%5D=2&columns%5B2%5D%5Bname%5D=&columns%5B2%5D%5Bsearchable%5D=true&columns%5B2%5D%5Borderable%5D=false&columns%5B2%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B2%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B3%5D%5Bdata%5D=3&columns%5B3%5D%5Bname%5D=&columns%5B3%5D%5Bsearchable%5D=true&columns%5B3%5D%5Borderable%5D=false&columns%5B3%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B3%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B4%5D%5Bdata%5D=4&columns%5B4%5D%5Bname%5D=&columns%5B4%5D%5Bsearchable%5D=true&columns%5B4%5D%5Borderable%5D=false&columns%5B4%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B4%5D%5Bsearch%5D%5Bregex%5D=false&start=0&length=500&search%5Bvalue%5D=&search%5Bregex%5D=false&json=";
+$json = '{"ApplicationNumber":null,"ApplicationYear":null,"DateFrom":"01/04/2017","DateTo":"01/04/2017","DateType":"1","RemoveUndeterminedApplications":false,"ApplicationDescription":null,"ApplicationType":null,"UnitNumberFrom":null,"UnitNumberTo":null,"StreetNumberFrom":null,"StreetNumberTo":null,"StreetName":null,"SuburbName":null,"PostCode":null,"PropertyName":null,"LotNumber":null,"PlanNumber":null,"ShowOutstandingApplications":false,"ShowExhibitedApplications":false,"PropertyKeys":null,"PrecinctValue":null,"IncludeDocuments":false}';
+$json = json_decode($json);
+$json->DateFrom = $sdate;
+$json->DateTo   = $edate;
+$json = json_encode($json);
+$page = $browser->post($url_base. "/Application/GetApplications", $junk. urlencode($json), $headers);
 
-$term_url = "http://planning.camden.nsw.gov.au/MasterViewUI/Modules/ApplicationMaster/Default.aspx";
+# get payload from the HTTP respond
+$payload = preg_split("#\n\s*\n#Uis", $page->html);
+$payload = json_decode($payload[1]);
 
-$da_page  = $url_base . "default.aspx?page=found&1=" .$period. "&4a=10&5=T";
-$comment_base = "mailto:mail@camden.nsw.gov.au?subject=Development Application Enquiry: DA-";
-$user_agent = "User-Agent:Mozilla/5.0 (Windows NT 6.1; WOW64) PlanningAlerts.org.au";
+foreach ($payload->data as $record) {
+    $description = explode("<b>", $record[4])[1];
+    $description = strip_tags($description);
+    $description = empty($description) ? $record[2] : preg_replace('/\s+/', ' ', $description);
 
-$cookies = accept_terms_get_cookies($term_url, "Agree");
+    $date_received = explode("/", $record[3]);
+    $date_received = $date_received[2]. "-" .$date_received[1]. "-" .$date_received[0];
 
-# Manually set cookie's key and get the value from array
-$request = array(
-    'http'    => array(
-    'header'  => "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n".
-                 "$user_agent\r\n"
-    ));
-$context = stream_context_create($request);
-$dom = file_get_html($da_page, false, $context);
+    # Put all information in an array
+    $application = [
+        'council_reference' => $record[1],
+        'address'           => explode(" <br/>", $record[4])[0],
+        'description'       => $description,
+        'info_url'          => $url_base . "/Application/ApplicationDetails/" .$record[0],
+        'comment_url'       => $comment_base,
+        'date_scraped'      => date('Y-m-d'),
+        'date_received'     => $date_received
+    ];
 
-# By default, assume it is single page
-$dataset  = $dom->find("tr[class=rgRow], tr[class=rgAltRow]");
-$NumPages = count($dom->find('div[class=rgWrap rgNumPart] a'));
-if ($NumPages === 0) { $NumPages = 1; }
-
-for ($i = 1; $i <= $NumPages; $i++) {
-    # If more than a single page, fetch the page
-    if ($NumPages > 1) {
-        $eventtarget = substr($dom->find('div[class=rgWrap rgNumPart] a',$i-1)->href, 25, 61);
-        $request = array(
-            'http'    => array(
-            'method'  => "POST",
-            'header'  => "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n" .
-                         "Content-Type: application/x-www-form-urlencoded\r\n".
-                         "$user_agent\r\n",
-            'content' => http_build_query(buildformdata($dom, $eventtarget))));
-        $context = stream_context_create($request);
-        $html = file_get_html($da_page, false, $context);
-
-        $dataset = $html->find("tr[class=rgRow], tr[class=rgAltRow]");
-        echo "Scraping page $i of $NumPages\r\n";
-    }
-
-    # The usual, look for the data set and if needed, save it
-    foreach ($dataset as $record) {
-        # Slow way to transform the date but it works
-        $date_received = explode('/', trim($record->find('td',2)->plaintext));
-        $date_received = "$date_received[2]-$date_received[1]-$date_received[0]";
-        $date_received = date('Y-m-d', strtotime($date_received));
-
-        # Prep a bit more, ready to add these to the array
-        $tempstr = explode('<br />', $record->find('td', 3)->innertext);
-        $addr    = trim(html_entity_decode($tempstr[0]));
-        $addr    = preg_replace('/\s+/', ' ', $addr) . ", NSW, Australia";
-        
-        $desc    = trim(html_entity_decode($tempstr[1]));
-        $desc    = preg_replace('/\s+/', ' ', $desc);
-        
-        $council_reference = trim(html_entity_decode($record->find('td',1)->plaintext));
-        $council_reference = preg_replace('/\s+/', ' ', $council_reference);
-        $council_reference = explode(' - ', $council_reference);
-        $council_reference = $council_reference[1];
-        
-        $info_url = $url_base . trim($record->find('a',0)->href);
-
-        # request the actual DA page to get full description, also tidy up the text to the best I can
-        $request = array(
-            'http'    => array(
-            'method'  => "GET",
-            'header'  => "Accept-language: en\r\n" .
-                         "Cookie: ASP.NET_SessionId=" .$cookies['ASP_NET_SessionId']. "; path=/; HttpOnly\r\n".
-                         "$user_agent\r\n"
-                         ));
-        $context = stream_context_create($request);        
-        $dahtml  = file_get_html($info_url, false, $context);
-        $desc    = trim(html_entity_decode($dahtml->find('DIV[id=lblDetails]',0)->innertext));
-        $desc    = mb_convert_encoding($desc, 'ASCII');
-        $desc    = explode('<br>', $desc);
-        $desc    = explode('Description: ', $desc[1]);
-        $desc    = $desc[1];
-        $desc    = trim(preg_replace('/\s+/', ' ', $desc));
-
-        # Put all information in an array
-        $application = array (
-            'council_reference' => $council_reference,
-            'address'           => $addr,
-            'description'       => $desc,
-            'info_url'          => $info_url,
-            'comment_url'       => $comment_base . $council_reference,
-            'date_scraped'      => date('Y-m-d'),
-            'date_received'     => $date_received
-        );
-
-        # Check if record exist, if not, INSERT, else do nothing
-        $existingRecords = scraperwiki::select("* from data where `council_reference`='" . $application['council_reference'] . "'");
-        if (count($existingRecords) == 0) {
-            print ("Saving record " . $application['council_reference'] . "\n");
-            # print_r ($application);
-            scraperwiki::save(array('council_reference'), $application);
-        } else {
-            print ("Skipping already saved record " . $application['council_reference'] . "\n");
-        }
+    # Check if record exist, if not, INSERT, else do nothing
+    $existingRecords = scraperwiki::select("* from data where `council_reference`='" . $application['council_reference'] . "'");
+    if (count($existingRecords) == 0) {
+        print ("Saving record " . $application['council_reference'] . " - " .$application['address']. "\n");
+//         print_r ($application);
+        scraperwiki::save(['council_reference'], $application);
+    } else {
+        print ("Skipping already saved record " . $application['council_reference'] . "\n");
     }
 }
 

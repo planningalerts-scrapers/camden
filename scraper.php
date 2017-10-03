@@ -29,7 +29,7 @@ switch(getenv('MORPH_PERIOD')) {
 }
 print "Getting data between " .$sdate. " and " .$edate. ", changable via MORPH_PERIOD environment\n";
 
-$url_base = "http://planning.camden.nsw.gov.au";
+$url_base = "https://planning.camden.nsw.gov.au";
 $comment_base = "mailto:mail@camden.nsw.gov.au";
 
 $browser = new PGBrowser();
